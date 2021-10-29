@@ -2,28 +2,15 @@
 // -*- mode: typescript -*-
 
 import {
-  gitCmd
-  , catFile
-  , revisionList
-  , decodeTextLines
-  , parseCommit
-  , decode
+  gitCmd, decode
+  , parsedCommitList
 } from './git-wrapper.ts'
 
-let head, branch
-{
-  branch = decode(await gitCmd(['symbolic-ref', 'HEAD'])).trimRight()
-  const headHash = decode(await gitCmd(['rev-parse', branch])).trimRight()
-  const commit = decode(await catFile(headHash)).trimRight()
-  head = parseCommit(headHash, commit)
-  console.log(head)
-}
+const branch = decode(await gitCmd(['symbolic-ref', 'HEAD'])).trimRight()
 
-const revList = await Promise.all(decodeTextLines(await revisionList(Deno.args)).reverse().map(async cmmt => {
-  const objStr = await catFile(cmmt)
-  const obj = parseCommit(cmmt, decode(objStr))
-  return obj
-}))
+const [head] = await parsedCommitList([branch]);
+
+const revList = await parsedCommitList(Deno.args)
 
 if (head != null && revList.length) {
   // Check whether current HEAD and revList[0] has same tree.

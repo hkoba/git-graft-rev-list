@@ -11,6 +11,22 @@ export async function gitCmd(args: string[], directory?: string): Promise<Uint8A
   return await pipe.output();
 }
 
+export async function loadCommit(cmmt: string, directory?: string): Promise<CommitObj> {
+  return parseCommit(cmmt, decode(await catFile(cmmt, directory)).trimRight())
+}
+
+export async function parsedCommitList(args: string[], directory?: string): Promise<CommitObj[]> {
+  const revs = decodeTextLines(await revisionList(args, directory))
+  return await Promise.all(
+      revs.reverse()
+      .map(async cmmt => {
+        const objStr = await catFile(cmmt, directory)
+        const obj = parseCommit(cmmt, decode(objStr))
+        return obj
+      })
+  )
+}
+
 export async function currentBranchRaw(directory?: string): Promise<Uint8Array> {
   return await gitCmd(['symbolic-ref', '--short', 'HEAD'], directory)
 }
