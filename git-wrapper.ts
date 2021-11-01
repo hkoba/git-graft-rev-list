@@ -3,12 +3,31 @@
 export async function gitCmd(args: string[], directory?: string): Promise<Uint8Array> {
   const cmd = ['git', ...(directory ? ["-C", ...directory] : []), ...args];
   const pipe =  Deno.run({cmd, stdout: 'piped', stderr: 'piped'});
+  const result = await pipe.output();
   const rc = await pipe.status();
   if (rc.code !== 0) {
     const err = await pipe.stderrOutput();
     throw new Error(`Error: ${decode(err)} from command: ${cmd.join(' ')}`)
   }
-  return await pipe.output();
+  return result
+}
+
+export async function createCommitWithParents(
+  replaceMap: Map<string, string>,
+  cmmt: CommitObj,
+  newParent?: string[],
+  directory?: string
+): Promise<string> {
+  if (newParent == null) {
+    newParent = cmmt.parent.map(h => replaceMap.get(h) ?? h);
+  }
+  await gitCmd(['replace', '--graft', cmmt.hash, ...newParent], directory)
+  const replace = decode(Deno.readFileSync(`.git/refs/replace/${cmmt.hash}`)).trim()
+  replaceMap.set(cmmt.hash, replace)
+
+  // Having many replace object might cause problem, so delete them.
+  await gitCmd(['replace', '-d', cmmt.hash], directory)
+  return replace
 }
 
 export async function loadCommit(cmmt: string, directory?: string): Promise<CommitObj> {

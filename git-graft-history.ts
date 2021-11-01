@@ -4,43 +4,58 @@
 import {
   gitCmd, decode
   , parsedCommitList
+  , createCommitWithParents
 } from './git-wrapper.ts'
 
 const branch = decode(await gitCmd(['symbolic-ref', 'HEAD'])).trimRight()
 
-const [head] = await parsedCommitList([branch]);
+const history = await parsedCommitList([branch]);
+const head = history[history.length - 1]
 
 const revList = await parsedCommitList(Deno.args)
 
 if (head != null && revList.length) {
   // Check whether current HEAD and revList[0] has same tree.
 
+  console.log(`branch head: `, head)
+
   const graftedHead = revList[0]
+  console.log(`grafted head: `, graftedHead)
   if (graftedHead == null)
     throw new Error(`rev-list is empty`)
   if (head.tree !== graftedHead.tree) {
-    throw new Error(`Tree hash mismatch!`)
+    throw new Error(`Tree hash mismatch! branch ${branch} head: ${head.tree} graftHead: ${graftedHead.tree}`)
   }
 
   // Create git replace --graft for all revList to reparent with working history
   const replaceMap: Map<string,string> = new Map
-  for (const hash of graftedHead.parent!) {
-    replaceMap.set(hash, head.hash)
+  let graftedRest
+  if (graftedHead.parent.length > 0) {
+    graftedRest = revList
+    for (const hash of graftedHead.parent) {
+      replaceMap.set(hash, head.hash)
+    }
+  } else {
+    await createCommitWithParents(replaceMap, graftedHead, [head.hash])
+    graftedRest = revList.slice(1)
+    console.log(`rest head: `, graftedRest[0])
   }
-  for (const cmmt of revList) {
-    if (cmmt.parent.length === 0 || cmmt.parent.filter(h => replaceMap.has(h)).length === 0) {
+  for (const cmmt of graftedRest) {
+    if (cmmt.parent.length === 0) {
       console.log('SKIPPED: ', cmmt)
       continue;
-    } else {
-      console.log('REPLACING...', cmmt)
     }
-    const newParent = cmmt.parent.map(h => replaceMap.get(h) ?? h);
-    await gitCmd(['replace', '--graft', cmmt.hash, ...newParent])
-    const replace = decode(Deno.readFileSync(`.git/refs/replace/${cmmt.hash}`)).trim()
-    replaceMap.set(cmmt.hash, replace)
+    else if (cmmt.parent.filter(h => replaceMap.has(h)).length === 0) {
+      console.log(`Can't set parent for commit:`, cmmt)
+      console.log(`replaceMap: `, replaceMap)
+      Deno.exit(1)
+    }
+    else {
+      // console.log('REPLACING...', cmmt)
+    }
 
-    // Having many replace object might cause problem, so delete them.
-    await gitCmd(['replace', '-d', cmmt.hash])
+    const replace = await createCommitWithParents(replaceMap, cmmt)
+    console.log(`replaced ${cmmt.hash} with ${replace}. #replaceMap = ${replaceMap.size}`)
   }
 
   // Move branch forward
